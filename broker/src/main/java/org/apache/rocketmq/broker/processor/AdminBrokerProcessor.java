@@ -201,6 +201,8 @@ public class AdminBrokerProcessor implements NettyRequestProcessor {
                 return fetchAllConsumeStatsInBroker(ctx, request);
             case RequestCode.QUERY_CONSUME_QUEUE:
                 return queryConsumeQueue(ctx, request);
+            case RequestCode.RESUME_CHECK_HALF_MESSAGE:
+                return resumeCheckHalfMessage(ctx, request);
             default:
                 break;
         }
@@ -1369,4 +1371,10 @@ public class AdminBrokerProcessor implements NettyRequestProcessor {
 
         return response;
     }
+
+
+    private RemotingCommand resumeCheckHalfMessage(ChannelHandlerContext ctx, RemotingCommand request) {
+        return null;
+    }
+
 }
