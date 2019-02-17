@@ -1583,6 +1583,7 @@ public class AdminBrokerProcessor implements NettyRequestProcessor {
                         "Put message back to RMQ_SYS_TRANS_HALF_TOPIC. real topic={}",
                         msg.getUserProperty(MessageConst.PROPERTY_REAL_TOPIC));
                 response.setCode(ResponseCode.SUCCESS);
+                response.setRemark(null);
                 resumeCheckHalfMessageResult.setResumeResult(ResumeResult.RESUME_SUCCESS);
                 resumeCheckHalfMessageResult.setSpentTimeMills(System.currentTimeMillis() - beginTime);
                 response.setBody(resumeCheckHalfMessageResult.encode());

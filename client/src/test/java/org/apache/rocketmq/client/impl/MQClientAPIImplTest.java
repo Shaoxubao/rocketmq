@@ -19,6 +19,7 @@ package org.apache.rocketmq.client.impl;
 import java.lang.reflect.Field;
 import org.apache.rocketmq.client.ClientConfig;
 import org.apache.rocketmq.client.exception.MQBrokerException;
+import org.apache.rocketmq.client.exception.MQClientException;
 import org.apache.rocketmq.client.hook.SendMessageContext;
 import org.apache.rocketmq.client.impl.producer.DefaultMQProducerImpl;
 import org.apache.rocketmq.client.producer.DefaultMQProducer;
@@ -28,6 +29,8 @@ import org.apache.rocketmq.client.producer.SendStatus;
 import org.apache.rocketmq.common.message.Message;
 import org.apache.rocketmq.common.message.MessageConst;
 import org.apache.rocketmq.common.protocol.ResponseCode;
+import org.apache.rocketmq.common.protocol.body.ResumeCheckHalfMessageResult;
+import org.apache.rocketmq.common.protocol.body.ResumeResult;
 import org.apache.rocketmq.common.protocol.header.SendMessageRequestHeader;
 import org.apache.rocketmq.common.protocol.header.SendMessageResponseHeader;
 import org.apache.rocketmq.remoting.InvokeCallback;
@@ -62,7 +65,7 @@ public class MQClientAPIImplTest {
     @Mock
     private DefaultMQProducerImpl defaultMQProducerImpl;
 
-    private String brokerAddr = "127.0.0.1";
+    private String brokerAddr = "127.0.0.1:10911";
     private String brokerName = "DefaultBroker";
     private static String group = "FooBarGroup";
     private static String topic = "FooBar";
@@ -162,7 +165,7 @@ public class MQClientAPIImplTest {
             public Object answer(InvocationOnMock mock) throws Throwable {
                 InvokeCallback callback = mock.getArgument(3);
                 RemotingCommand request = mock.getArgument(1);
-                ResponseFuture responseFuture = new ResponseFuture(null,request.getOpaque(), 3 * 1000, null, null);
+                ResponseFuture responseFuture = new ResponseFuture(null, request.getOpaque(), 3 * 1000, null, null);
                 responseFuture.setResponseCommand(createSuccessResponse(request));
                 callback.operationComplete(responseFuture);
                 return null;
@@ -210,6 +213,45 @@ public class MQClientAPIImplTest {
         }
     }
 
+    @Test
+    public void testResumeCheckHalfMessage_WithException() throws RemotingException, InterruptedException, MQBrokerException, MQClientException {
+        doAnswer(new Answer() {
+            @Override
+            public Object answer(InvocationOnMock mock) throws Throwable {
+                RemotingCommand request = mock.getArgument(1);
+                RemotingCommand response = RemotingCommand.createResponseCommand(SendMessageResponseHeader.class);
+                response.setCode(ResponseCode.SYSTEM_ERROR);
+                response.setOpaque(request.getOpaque());
+                response.setRemark("Put message back to RMQ_SYS_TRANS_HALF_TOPIC failed.");
+                return response;
+            }
+        }).when(remotingClient).invokeSync(anyString(), any(RemotingCommand.class), anyLong());
+
+        try {
+            ResumeCheckHalfMessageResult result = mqClientAPI.resumeCheckHalfMessage(brokerAddr, "test", 3000);
+            failBecauseExceptionWasNotThrown(MQClientException.class);
+        } catch (MQClientException e) {
+            assertThat(e).hasMessageContaining("Put message back to RMQ_SYS_TRANS_HALF_TOPIC failed.");
+        }
+    }
+
+    @Test
+    public void testResumeCheckHalfMessage_Success() throws InterruptedException, RemotingException, MQBrokerException, MQClientException {
+        doAnswer(new Answer() {
+            @Override
+            public Object answer(InvocationOnMock mock) throws Throwable {
+                RemotingCommand request = mock.getArgument(1);
+                return createResumeSuccessResponse(request);
+            }
+        }).when(remotingClient).invokeSync(anyString(), any(RemotingCommand.class), anyLong());
+
+        ResumeCheckHalfMessageResult result = mqClientAPI.resumeCheckHalfMessage(brokerAddr, "test", 3000);
+
+        assertThat(result.getSpentTimeMills()).isEqualTo(1000L);
+        assertThat(result.getResumeResult()).isEqualTo(ResumeResult.RESUME_SUCCESS);
+        assertThat(result.getRemark()).isEqualTo(null);
+    }
+
     private RemotingCommand createSuccessResponse(RemotingCommand request) {
         RemotingCommand response = RemotingCommand.createResponseCommand(SendMessageResponseHeader.class);
         response.setCode(ResponseCode.SUCCESS);
@@ -225,6 +267,17 @@ public class MQClientAPIImplTest {
         response.addExtField("queueId", String.valueOf(responseHeader.getQueueId()));
         response.addExtField("msgId", responseHeader.getMsgId());
         response.addExtField("queueOffset", String.valueOf(responseHeader.getQueueOffset()));
+        return response;
+    }
+
+    private RemotingCommand createResumeSuccessResponse(RemotingCommand request) {
+        RemotingCommand response = RemotingCommand.createResponseCommand(null);
+        response.setCode(ResponseCode.SUCCESS);
+        response.setOpaque(request.getOpaque());
+        ResumeCheckHalfMessageResult result = new ResumeCheckHalfMessageResult();
+        result.setResumeResult(ResumeResult.RESUME_SUCCESS);
+        result.setSpentTimeMills(1000L);
+        response.setBody(result.encode());
         return response;
     }
 
